@@ -1,4 +1,4 @@
-// import { createHash } from 'crypto';
+import { createHash } from 'crypto';
 // import { isUrl } from 'check-valid-url';
 // import { MongoClient } from 'mongodb';
 
@@ -6,16 +6,16 @@
 
 export async function main(event, context) {
   // Poor man auth
-  if (event?.http?.['x-auth-bearer'] !== process.env.BEARER) {
+  if (event?.http?.headers?.['x-auth-bearer'] !== process.env.BEARER) {
     return { statusCode: 401, body: 'Unauthorized' };
   }
 
 
   console.log('event', event);
   console.log('context', context);
-  // const md5Hash = (string) => {
-  //   return createHash('md5').update(string).digest('hex');
-  // };
+  const md5Hash = (string) => {
+    return createHash('md5').update(string).digest('hex');
+  };
 
   // try {
   //   const { url } = args;
@@ -36,7 +36,7 @@ export async function main(event, context) {
   // } catch (error) {
   //   console.error(error)
   // }
-  return { body: { event, context } };
+  return { body: { event, context, md5: md5Hash('worker') } };
 }
 
 // const returnValue = await main({ "url": "https://google.com" })
@@ -45,3 +45,4 @@ export async function main(event, context) {
 
 // process.exit()
 
+// console.log(main());

@@ -1,5 +1,6 @@
 environment:
   BEARER: "${BEARER}"
+  MONGO_CONNECTION_STRING: "${MONGO_CONNECTION_STRING}"
 packages:
   - name: functions
     actions:
