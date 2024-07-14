@@ -9,6 +9,10 @@ const client = new MongoClient(process.env.MONGO_CONNECTION_STRING);
 let data = [];
 const processor = {};
 
+if (!process.env.WORKER_URL) {
+  throw new Error('Worker URL not set. Cannot start');
+}
+
 (async () => {
   // connect to the db
   const database = client.db('urls');
