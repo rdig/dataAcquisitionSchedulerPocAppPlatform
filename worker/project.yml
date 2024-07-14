@@ -1,0 +1,5 @@
+packages:
+  - name: functions
+    actions:
+      - name: worker-function
+        runtime: 'nodejs:18'
