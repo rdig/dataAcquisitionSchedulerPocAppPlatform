@@ -1,0 +1,23 @@
+{
+  "name": "worker",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rdig/dataAcquisitionSchedulerPocAppPlatform.git"
+  },
+  "author": "Raul <raul@glogovetan.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/rdig/dataAcquisitionSchedulerPocAppPlatform/issues"
+  },
+  "homepage": "https://github.com/rdig/dataAcquisitionSchedulerPocAppPlatform#readme",
+  "dependencies": {
+    "check-valid-url": "^0.1.0",
+    "cheerio": "^1.0.0-rc.12",
+    "mongodb": "^6.8.0"
+  }
+}
