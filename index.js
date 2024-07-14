@@ -2,16 +2,25 @@ import express from 'express';
 import { createHash } from 'crypto';
 import { isUrl } from 'check-valid-url';
 import { MongoClient } from 'mongodb';
+import fetch from 'node-fetch';
 
 const client = new MongoClient(process.env.MONGO_CONNECTION_STRING);
 
-let workerCount = process.env.WORKER_COUNT || 2;
 let data = [];
 const processor = {};
-const simulatedDB = {};
 
 (async () => {
+  // connect to the db
+  const database = client.db('urls');
+  const defaultCollection = database.collection('default');
+  const workersCollection = database.collection('workers');
+  const getWorkerCountQuery = { id: '1' };
+
   // declare methods
+  const md5Hash = (string) => {
+    return createHash('md5').update(string).digest('hex');
+  };
+
   const handleQueue = (...args) => {
     console.log('Array updated', ...args);
 
@@ -26,10 +35,54 @@ const simulatedDB = {};
       url: urlToProcess,
       state: 'processing',
     };
-    console.log('added entry to processor', processor[urlId]);
+    console.log('added entry to processor', urlToProcess);
 
     // pass it to the worker
-    simulatedWorker(urlToProcess);
+    fetch(
+      process.env.WORKER_URL,
+      {
+        method: 'POST',
+        body: JSON.stringify({ url: urlToProcess }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-auth-bearer': process.env.BEARER,
+        },
+      }
+    ).then((response) => response.json().then((responseData) => {
+      // this is a really shitty way to check this
+      // problem is worker no longer has access to the internal processor state
+      // so either move that state to the db or standardize worker responses
+      // but I'm too lazy for that right now
+      if (responseData.message === 'Parsed URL') {
+        // update processor state
+        processor[urlId].state = 'done';
+        console.log('Tentatively, the worker has finished', urlToProcess);
+      }
+      // this means the worker failed outside of it's own code and try/catch blocks
+      // that means that it can't clean up after itself due to the execution erroring out
+      // or it reaching the timeout
+      // this means that we have to clean up after it, which is again, kinda shitty
+      if (responseData?.error && Object.keys(responseData.error).length) {
+        workersCollection.findOne(getWorkerCountQuery).then(({ count }) => {
+          if (count < (process.env.WORKER_COUNT || 2)) {
+            console.log('Worker failed, cleaning up and adding a new one');
+            workersCollection.updateOne(getWorkerCountQuery, { $set: { count: count + 1 } });
+          }
+        });
+        // remove the entry so we don't processs it again
+        // if it's still in the processor, set it to done so it won't be processed again
+        if (processor[urlId]?.state) {
+          processor[urlId].state = 'done';
+        }
+        // if it's in the data array, remove it
+        const indexToRemove = data.indexOf(urlToProcess);
+        if (indexToRemove > -1) {
+          data.splice(indexToRemove, 1);
+        }
+        console.log('Worker failed, remoing url so its not processed again', urlToProcess);
+      }
+    })).catch(error => console.log(error));
+
     console.log('passed url to worker', urlToProcess);
 
     // set timeout if the worker doesn't respond in time (by checking processor state)
@@ -41,54 +94,10 @@ const simulatedDB = {};
       }
       // clean processsor entry --- if it's not done (timeout passed), put it back in the queue, if it's done, just remove it
       delete processor[urlId];
-    }, 6000);
+      // this is a bit smelly, should not be a "magic number"
+    }, 10000);
 
   };
-
-  const randomTimeMs = (min, max) => {
-    return Math.floor(Math.random() * (max - min + 1) + min);
-  }
-
-  const md5Hash = (string) => {
-    return createHash('md5').update(string).digest('hex');
-  };
-
-  const simulatedWorker = async (url) => {
-    // todo id
-    // take out worker count
-    workerCount -= 1;
-    return new Promise((resolve, reject) => {
-      const failureRandomness = randomTimeMs(0, 10);
-      const timeout = failureRandomness >= 9 ? 6500 : randomTimeMs(1000, 3000);
-      setTimeout(() => {
-        // put data in the db,
-        const urlId = md5Hash(url);
-        simulatedDB[urlId] = {
-          id: urlId,
-          url,
-          data: JSON.stringify({ content: '<html><title>crawled</title><body>hello</body></html>' }),
-          updatedAt: new Date().getTime(),
-        };
-        console.log('worker database update', simulatedDB[urlId])
-
-        // update processor state
-        try {
-          processor[urlId].state = 'done';
-          console.log('Worker done', url);
-        } catch (error) {
-          console.log('Worker failed to process', url);
-        }
-        // put back worker count
-        workerCount += 1;
-        resolve(url);
-      }, timeout);
-    })
-  }
-
-
-  // connect to the db
-  const database = client.db('urls');
-  const collection = database.collection('default');
 
   // TODO Bearer auth
   // Set up express server
@@ -104,29 +113,43 @@ const simulatedDB = {};
 
   // List current queue
   server.get('/queue', (req, res) => {
-    res.status(200).json(data);
+    if (req?.headers?.['x-auth-bearer'] !== process.env.BEARER) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+    return res.status(200).json(data);
   })
 
   // List current processor
   server.get('/processor', (req, res) => {
-    res.status(200).json(processor);
+    if (req?.headers?.['x-auth-bearer'] !== process.env.BEARER) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+    return res.status(200).json(processor);
   })
 
   // List current simulated db
   server.get('/db', async (req, res) => {
-    const entries = await collection.find({}).toArray();
-    res.status(200).json(entries);
+    if (req?.headers?.['x-auth-bearer'] !== process.env.BEARER) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+    const entries = await defaultCollection.find({}).toArray();
+    return res.status(200).json(entries);
   })
 
-  // Reset queue (to placeholder urls)
+  // Reset queue
   server.get('/reset', (req, res) => {
-    // TODO Reset the data array;
+    if (req?.headers?.['x-auth-bearer'] !== process.env.BEARER) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
     data.splice(0);
-    res.status(200).json({ message: 'Queue reset' });
+    return res.status(200).json({ message: 'Queue reset' });
   })
 
   // Add more urls to queue
   server.post('/add', (req, res) => {
+    if (req?.headers?.['x-auth-bearer'] !== process.env.BEARER) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
     // Need to use splice again, as observe doesn't work with concat
     // And push is kinda costly
     let requestData = req.body;
@@ -135,31 +158,32 @@ const simulatedDB = {};
       .filter((url) => typeof url === 'string')
       .filter(isUrl);
     data.splice(data.length, 0, ...requestData);
-    res.status(200).json({ message: `${requestData.length} URLs added`, data: requestData });
+    return res.status(200).json({ message: `${requestData.length} URLs added`, data: requestData });
   })
 
   // Start server
   server.listen(port, () => {
-    console.log(`Example app listening on port ${port}`)
+    console.log(`Scheduler listening on port ${port}`)
   })
 
   // start process tick
-  const TICK = process.env.TICK || 500;
   setInterval(() => {
-    // if worker free
-    // if data in queue
-    if (workerCount && data.length) {
-      handleQueue();
-    }
+    workersCollection.findOne(getWorkerCountQuery).then(({ count: workerCount }) => {
+      // if worker free
+      // if data in queue
+      if (workerCount && data.length) {
+        handleQueue();
+      }
 
-    if (!workerCount) {
-      // todo proper back off logic
-      console.log('All workers busy, backing off ...');
-    }
+      if (!workerCount) {
+        // todo proper back off logic
+        console.log('All workers busy, backing off ...');
+      }
 
-    if (!data.length) {
-      console.log('Queue empty, waiting. ...');
-    }
-  }, TICK);
+      if (!data.length) {
+        // console.log('Queue empty, waiting. ...');
+      }
+    });
+  }, process.env.TICK || 500);
 
 })()
