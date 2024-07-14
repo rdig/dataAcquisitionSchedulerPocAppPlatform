@@ -6,3 +6,6 @@ packages:
     actions:
       - name: worker-function
         runtime: 'nodejs:18'
+        limits:
+          timeout: 60000
+          memory: 512
