@@ -1,3 +1,5 @@
+environment:
+  BEARER: "${BEARER}"
 packages:
   - name: functions
     actions:
