@@ -2,9 +2,7 @@
   "name": "worker",
   "version": "1.0.0",
   "type": "module",
-  "scripts": {
-    "start": "node index"
-  },
+  "main": "index.js",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rdig/dataAcquisitionSchedulerPocAppPlatform.git"
